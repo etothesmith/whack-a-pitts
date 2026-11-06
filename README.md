@@ -13,6 +13,8 @@ A 7-level browser game: Assistant Principal Dr. Caliari vs. the chaotic PE coach
 6. **In-Service Stealth Escape** – sneak past Pitts' flashlight cones
 7. **The Field Day Fiasco** – 3-phase golf-cart boss battle
 
+Pick **Easy, Medium or Hard** when you start (change it any time from the level select). Hard scores x1.3, Easy x0.75.
+
 Works with keyboard, mouse or touch. On phones: play in landscape, use the thumb stick on the left, and add it to your home screen (Share → Add to Home Screen on iPhone) to play full screen like an app. Progress, stars and high scores save in your browser.
 Secret: type `WORKORDER` (or tap the star counter on the level select 5 times) for Infinite Coffee Mode.
 
