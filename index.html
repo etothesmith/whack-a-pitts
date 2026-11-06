@@ -2,18 +2,41 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Whack-a-Pitts: The Revenge of Dr. Caliari</title>
+<meta name="theme-color" content="#17112b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Whack-a-Pitts">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Nunito:wght@700;800;900&display=swap" rel="stylesheet">
 <style>
-  html, body { margin: 0; height: 100%; background: #17112b; overflow: hidden; }
-  body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
-  #game { position: fixed; inset: 0; width: 100vw; height: 100vh; object-fit: contain; display: block; outline: none; cursor: none; }
+  html, body { margin: 0; height: 100%; background: #17112b; overflow: hidden; overscroll-behavior: none; }
+  body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+  #game {
+    position: fixed; display: block; outline: none; cursor: none; object-fit: contain;
+    top: env(safe-area-inset-top, 0px); left: env(safe-area-inset-left, 0px);
+    width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+  @supports (height: 100dvh) { #game { height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); } }
+  #rotate {
+    position: fixed; inset: 0; z-index: 5; display: none; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; padding: 24px; text-align: center; background: #17112b; color: #ffcf33;
+    font: 900 26px 'Nunito', 'Trebuchet MS', Arial, sans-serif;
+  }
+  #rotate small { color: #cfe3ff; font-size: 16px; font-weight: 800; }
+  #rotate .ph { font-size: 84px; animation: rot 1.8s ease-in-out infinite; }
+  @keyframes rot { 0%, 30% { transform: rotate(0deg); } 60%, 100% { transform: rotate(-90deg); } }
 </style>
 </head>
 <body>
+<div id="rotate"><div class="ph">📱</div><div>Turn your phone sideways to play!</div><small>Whack-a-Pitts plays in landscape. Your game is paused.</small></div>
 <canvas id="game" tabindex="0" aria-label="Whack-a-Pitts game"></canvas>
 <script>
 "use strict";
@@ -299,17 +322,44 @@ function toLogical(e) {
   const ox = r.left + (r.width - W * s) / 2, oy = r.top + (r.height - H * s) / 2;
   return { x: (e.clientX - ox) / s, y: (e.clientY - oy) / s };
 }
+/* ---------- touch: floating thumb joystick (left half of the screen) ---------- */
+const IS_TOUCH = (window.matchMedia && matchMedia("(pointer: coarse)").matches) || ("ontouchstart" in window);
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0, ax: 0, ay: 0, R: 58 };
+function joystickWanted() { return typeof G !== "undefined" && G.state === "GAMEPLAY" && !G.paused && G.countdown <= 0 && G.level && G.level.usesJoystick; }
+function hitsButton(p) { return typeof hotButtons !== "undefined" && hotButtons.some(b => inRect(p.x, p.y, { x: b.x - 10, y: b.y - 10, w: b.w + 20, h: b.h + 20 })); }
 canvas.addEventListener("pointerdown", e => {
   SFX.init(); canvas.focus();
-  const p = toLogical(e); input.mx = p.x; input.my = p.y; input.down = true;
+  const p = toLogical(e), touch = e.pointerType && e.pointerType !== "mouse";
   input.lastPointer = e.pointerType || "mouse";
-  input.clicks.push(p);
   try { canvas.setPointerCapture(e.pointerId); } catch (_) { }
   e.preventDefault();
+  if (touch && joystickWanted()) {
+    if (joy.id === null && p.x < W * 0.5 && p.y > 50 && !hitsButton(p)) {
+      Object.assign(joy, { id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y, ax: 0, ay: 0 });
+      return;
+    }
+    input.mx = p.x; input.my = p.y; input.clicks.push({ ...p, touch }); // taps only, no hold-to-move
+    return;
+  }
+  input.mx = p.x; input.my = p.y; input.down = true;
+  input.clicks.push({ ...p, touch });
 });
-canvas.addEventListener("pointermove", e => { const p = toLogical(e); input.mx = p.x; input.my = p.y; if (e.pointerType) input.lastPointer = e.pointerType; });
-window.addEventListener("pointerup", () => { input.down = false; });
-window.addEventListener("pointercancel", () => { input.down = false; });
+canvas.addEventListener("pointermove", e => {
+  const p = toLogical(e);
+  if (e.pointerId === joy.id) {
+    let dx = p.x - joy.ox, dy = p.y - joy.oy; const d = Math.hypot(dx, dy);
+    if (d > joy.R) { dx *= joy.R / d; dy *= joy.R / d; }
+    joy.x = joy.ox + dx; joy.y = joy.oy + dy;
+    const k = d < 9 ? 0 : 1; joy.ax = k * dx / joy.R; joy.ay = k * dy / joy.R;
+    return;
+  }
+  input.mx = p.x; input.my = p.y; if (e.pointerType) input.lastPointer = e.pointerType;
+});
+function pointerEnd(e) { if (e.pointerId === joy.id) { joy.id = null; joy.ax = joy.ay = 0; } else input.down = false; }
+window.addEventListener("pointerup", pointerEnd);
+window.addEventListener("pointercancel", pointerEnd);
+window.addEventListener("touchend", () => SFX.init(), { passive: true });
 canvas.addEventListener("contextmenu", e => e.preventDefault());
 const kp = (...ks) => ks.some(k => input.pressed[k]);
 const kd = (...ks) => ks.some(k => input.keys[k]);
@@ -317,8 +367,44 @@ function moveAxes() {
   let x = 0, y = 0;
   if (kd("ArrowLeft", "a")) x -= 1; if (kd("ArrowRight", "d")) x += 1;
   if (kd("ArrowUp", "w")) y -= 1; if (kd("ArrowDown", "s")) y += 1;
+  if (!x && !y && joy.id !== null) { x = joy.ax; y = joy.ay; }
   return { x, y };
 }
+function drawJoystick() {
+  if (joy.id !== null) {
+    ctx.globalAlpha = 0.35; circ(joy.ox, joy.oy, joy.R + 10, "#fff", INK, 3);
+    ctx.globalAlpha = 0.85; circ(joy.x, joy.y, 26, "#ffcf33", INK, 3); ctx.globalAlpha = 1;
+  } else {
+    ctx.globalAlpha = 0.28; circ(110, 440, joy.R + 10, "#fff", INK, 3); circ(110, 440, 26, "#ffcf33", INK, 3); ctx.globalAlpha = 1;
+    txt("DRAG TO MOVE", 110, 520, 14, "rgba(255,255,255,0.7)", "center", { stroke: INK, sw: 3 });
+  }
+}
+
+/* ---------- full screen + orientation ---------- */
+function fsAvailable() { return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled); }
+function isFullscreen() { return !!(document.fullscreenElement || document.webkitFullscreenElement); }
+function toggleFullscreen() {
+  try {
+    if (!isFullscreen()) {
+      const el = document.documentElement;
+      const r = el.requestFullscreen ? el.requestFullscreen({ navigationUI: "hide" }) : el.webkitRequestFullscreen && el.webkitRequestFullscreen();
+      const lock = () => { try { const o = screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape"); if (o && o.catch) o.catch(() => { }); } catch (_) { } };
+      if (r && r.then) r.then(lock).catch(() => toast("Full screen isn't allowed here — try the GitHub link.", 2.5)); else lock();
+    } else {
+      const x = document.exitFullscreen ? document.exitFullscreen() : document.webkitExitFullscreen && document.webkitExitFullscreen();
+      if (x && x.catch) x.catch(() => { });
+    }
+  } catch (_) { }
+}
+const rotateEl = document.getElementById("rotate");
+let PORTRAIT = false;
+function checkOrientation() {
+  PORTRAIT = IS_TOUCH && window.innerHeight > window.innerWidth * 1.05;
+  if (rotateEl) rotateEl.style.display = PORTRAIT ? "flex" : "none";
+}
+window.addEventListener("resize", checkOrientation);
+window.addEventListener("orientationchange", () => setTimeout(checkOrientation, 120));
+checkOrientation();
 
 /* ---------- effects: particles, bubbles, floaters, shake, toast ---------- */
 const FX = { parts: [], bubbles: [], floats: [], shake: 0, toast: null };
@@ -807,6 +893,16 @@ function muteButton() {
     ctx.beginPath(); ctx.arc(x + 20, y + 15, 10, -0.8, 0.8); ctx.stroke(); }
   buttons.push({ x, y, w, h, cb: toggleMute });
 }
+function fsButton(x, y) {
+  const w = 40, h = 30;
+  rr(x, y, w, h, 8, "rgba(255,255,255,0.9)", INK, 2.5);
+  const on = isFullscreen(), c = INK, m = 8, L = 7;
+  for (const [cx, cy, sx, sy] of [[x + m, y + 6, 1, 1], [x + w - m, y + 6, -1, 1], [x + m, y + h - 6, 1, -1], [x + w - m, y + h - 6, -1, -1]]) {
+    const d = on ? -1 : 1;
+    line(cx, cy, cx + sx * L * d, cy, c, 2.5); line(cx, cy, cx, cy + sy * L * d * 0.7, c, 2.5);
+  }
+  buttons.push({ x, y, w, h, cb: toggleFullscreen });
+}
 function toggleMute() { SFX.setMuted(!SFX.muted); save.muted = SFX.muted; persist(); if (!SFX.muted) SFX.play("click"); }
 
 /* ---------- HUD ---------- */
@@ -849,15 +945,15 @@ const LEVEL_META = [
     lines: [["caliari", "Forty-three 'repair requests.' Zero work orders."], ["pitts", "The bleachers broke because gravity was too strong today. That counts, right?"], ["caliari", "GREEN stamp for real emergencies. RED stamp for... that."]] },
   { name: "The Great Equipment Roundup", short: "EQUIPMENT ROUNDUP", setting: "The Hardwood Court · After 5th Period",
     goal: "Stow 40 pieces of equipment in the closet in 2 minutes.",
-    controls: ["Arrows / WASD (or hold a finger/mouse) to push the bin.", "Bin holds 6 items. Unload at the storage closet (top-left).", "Dodge Pitts' wind sprints and golf-cart burnouts or the bin spills!"],
+    controls: ["Arrows / WASD, hold the mouse, or use the thumb stick (drag on the left side) to push the bin.", "Bin holds 6 items. Unload at the storage closet (top-left).", "Dodge Pitts' wind sprints and golf-cart burnouts or the bin spills!"],
     lines: [["pitts", "5th period's over! Time for my golf cart burnouts!"], ["caliari", "The evening tournament starts in two minutes and there are basketballs EVERYWHERE."], ["caliari", "Five laps around the track, Pitts. After I clean up YOUR gym."]] },
   { name: "In-Service Stealth Escape", short: "STEALTH ESCAPE", setting: "Teacher In-Service Day Hallways",
     goal: "Grab all 5 sign-off clipboards, then slip out the staff exit.",
-    controls: ["Arrows / WASD (or hold to move). Stand behind vending machines or in doorways (H spots) to hide.", "SPACE / E (or the DONUT button) tosses a 'Free Donut' to lure nearby Pitts away.", "Stay out of the flashlight cones!"],
+    controls: ["Arrows / WASD, hold the mouse, or drag the thumb stick on the left. Stand behind vending machines or in doorways (H spots) to hide.", "SPACE / E (or the DONUT button) tosses a 'Free Donut' to lure nearby Pitts away.", "Stay out of the flashlight cones!"],
     lines: [["pitts", "DR. C! I've got a 47-page proposal: Competitive Dodgeball as a CORE ACADEMIC SUBJECT!"], ["caliari", "It's In-Service Day. Five sign-off sheets, then I'm out the staff door."], ["caliari", "Quietly. Very... quietly."]] },
   { name: "The Field Day Fiasco", short: "FIELD DAY FIASCO", setting: "Football Field & Track Stadium",
     goal: "Survive 3 phases and short-circuit Pitts' cart.",
-    controls: ["Move: Arrows / WASD (or hold). Throw work orders: F / Enter / click (aims at click).", "SPACE jumps over whistle shockwaves.", "Phase 3: stand on a sprinkler valve so his charge drives into the flood!"],
+    controls: ["Move: Arrows / WASD or the thumb stick. Throw: F / Enter / click (aims) — on touch, tap the right side.", "SPACE jumps over whistle shockwaves.", "Phase 3: stand on a sprinkler valve so his charge drives into the flood!"],
     lines: [["pitts", "No summer break until you beat me at FIELD DAY! Say hello to the Dodgeball Cannon!"], ["caliari", "Is that... a school golf cart? Did you file a work order for those modifications?!"], ["pitts", "PE IS A CORE SUBJECT, DR. C! FIRE!"]] }
 ];
 /* =====================================================================
@@ -1286,13 +1382,13 @@ class LevelWrestle {
     this.drawUI();
   }
   overlayButtons() {
-    const o = { size: 26, color: "rgba(255,255,255,0.92)" };
-    button(78, 358, 54, 54, "▲", () => this.dir("ArrowUp"), o);
-    button(20, 414, 54, 54, "◀", () => this.dir("ArrowLeft"), o);
-    button(136, 414, 54, 54, "▶", () => this.dir("ArrowRight"), o);
-    button(78, 470, 54, 54, "▼", () => this.dir("ArrowDown"), o);
+    const o = { size: 32, color: "rgba(255,255,255,0.92)" };
+    button(86, 318, 66, 66, "▲", () => this.dir("ArrowUp"), o);
+    button(14, 392, 66, 66, "◀", () => this.dir("ArrowLeft"), o);
+    button(158, 392, 66, 66, "▶", () => this.dir("ArrowRight"), o);
+    button(86, 466, 66, 66, "▼", () => this.dir("ArrowDown"), o);
     const pinning = !!this.pin;
-    button(W - 190, H - 100, 172, 84, pinning ? "PIN!" : "PUSH!", () => this.mash(), { size: 34, color: pinning ? "#7dffb0" : "#ffcf33" });
+    button(W - 200, H - 112, 186, 98, pinning ? "PIN!" : "PUSH!", () => this.mash(), { size: 34, color: pinning ? "#7dffb0" : "#ffcf33" });
   }
 }
 /* =====================================================================
@@ -1458,7 +1554,7 @@ class Level2 {
   }
   overlayButtons() {
     if (input.lastPointer !== "mouse" || this.ammo > 0 || this.t < 4)
-      button(W - 150, H - 70, 130, 54, `🎺 THROW (${this.ammo})`, () => this.fire(), { size: 20, color: this.ammo ? "#cfe3ff" : "#888" });
+      button(W - 166, H - 82, 146, 66, `🎺 THROW (${this.ammo})`, () => this.fire(), { size: 20, color: this.ammo ? "#cfe3ff" : "#888" });
   }
 }
 /* =====================================================================
@@ -1656,6 +1752,7 @@ class Level3 {
 const COURT = { x: 30, y: 60, w: 900, h: 466 };
 const CLOSET = { x: 30, y: 60, w: 130, h: 110 };
 class Level4 {
+  usesJoystick = true;
   init() {
     this.score = 0; this.t = 0; this.time = 120; this.stowed = 0; this.carried = []; this.items = []; this.hazards = [];
     this.px = 480; this.py = 330; this.vx = 0; this.vy = 0; this.stun = 0; this.face = 1; this.hazT = 3; this.coffeeT = 28; this.mugs = [];
@@ -1847,6 +1944,7 @@ const MAP5 = [
 ];
 const T5 = 40, OY5 = 20, COLS5 = 24, ROWS5 = 13;
 class Level5 {
+  usesJoystick = true;
   init() {
     this.score = 0; this.t = 0; this.grid = MAP5.map(r => r.split(""));
     this.clips = []; this.start = null; this.exit = null;
@@ -1931,7 +2029,7 @@ class Level5 {
     this.t += dt; this.timeT += dt;
     // player movement
     let { x: ax, y: ay } = moveAxes();
-    const holdBtn = input.down && input.mx > W - 170 && input.my > H - 80;
+    const holdBtn = input.down && input.mx > W - 186 && input.my > H - 90;
     if (input.down && !ax && !ay && !holdBtn) { const dx = input.mx - this.px, dy = input.my - this.py, d = Math.hypot(dx, dy); if (d > 10) { ax = dx / d; ay = dy / d; } }
     const len = Math.hypot(ax, ay);
     if (len) { ax /= len; ay /= len; this.face = Math.atan2(ay, ax); const o = { x: this.px, y: this.py }; this.moveCircle(o, ax * 135 * dt, ay * 135 * dt, 12); this.px = o.x; this.py = o.y; this.moving = true; } else this.moving = false;
@@ -2058,7 +2156,7 @@ class Level5 {
     list.sort((a, b) => a.y - b.y).forEach(o => o.d());
   }
   overlayButtons() {
-    button(W - 160, H - 66, 145, 52, `🍩 DONUT (${this.donuts})`, () => this.throwDonut(), { size: 20, color: this.donuts ? "#ff9fcb" : "#888" });
+    button(W - 176, H - 80, 160, 64, `🍩 DONUT (${this.donuts})`, () => this.throwDonut(), { size: 20, color: this.donuts ? "#ff9fcb" : "#888" });
   }
 }
 /* =====================================================================
@@ -2066,6 +2164,7 @@ class Level5 {
    ===================================================================== */
 const ARENA = { x: 30, y: 62, w: 900, h: 462 }, TCX = 480, TCY = 296, TRX = 395, TRY = 190;
 class Level6 {
+  usesJoystick = true;
   init() {
     this.score = 0; this.t = 0; this.phase = 1; this.bstate = "drive"; this.hpMax = [0, 12, 12, 3]; this.hp = 12;
     this.px = 480; this.py = 300; this.jT = 0; this.cd = 0; this.face = 1;
@@ -2090,7 +2189,7 @@ class Level6 {
     SFX.play("throw");
   }
   autoThrow() { const b = this.bossTarget(); const t = dist(this.px, this.py - 30, b.x, b.y) / 560; this.throwAt(b.x + (this.bvx || 0) * t, b.y + (this.bvy || 0) * t); }
-  click(x, y) { if (input.lastPointer === "mouse") this.throwAt(x, y); }
+  click(x, y, touch) { if (touch) this.autoThrow(); else this.throwAt(x, y); }
   nextPhase() {
     this.score += 1000; SFX.play("fanfare"); shake(14);
     burst(this.bx, this.by - 40, 40, ["#ffe14d", "#fff", "#ff7a1f"], { shape: "star" });
@@ -2324,8 +2423,9 @@ class Level6 {
   }
   overlayButtons() {
     if (input.lastPointer !== "mouse") {
-      button(W - 150, H - 70, 132, 54, "📋 THROW", () => this.autoThrow(), { size: 22, color: "#fffaf0" });
-      button(W - 292, H - 70, 126, 54, "⤴ JUMP", () => this.jump(), { size: 22, color: "#cfe3ff" });
+      button(W - 160, H - 84, 144, 68, "📋 THROW", () => this.autoThrow(), { size: 24, color: "#fffaf0" });
+      button(W - 316, H - 84, 140, 68, "⤴ JUMP", () => this.jump(), { size: 24, color: "#cfe3ff" });
+      txt("or tap the right side to throw", W - 170, H - 96, 13, "rgba(255,255,255,0.75)", "center", { stroke: INK, sw: 3 });
     }
   }
 }
@@ -2372,6 +2472,7 @@ function drawSplash() {
   txt("VS", W / 2, 330, 70, "#fff", "center", { stroke: INK, sw: 10 });
   if (Math.floor(t * 2) % 2 === 0) txt(input.lastPointer === "mouse" ? "CLICK OR PRESS ENTER TO START" : "TAP TO START", W / 2, 400, 30, "#7dffb0", "center", { stroke: INK });
   txt("A gag gift for Dr. Caliari · 7 levels of school-order justice", W / 2, 510, 16, "rgba(255,255,255,0.75)", "center", { font: FONT_B, weight: "800" });
+  if (IS_IOS && !navigator.standalone) txt("iPhone/iPad tip: Share → Add to Home Screen to play full screen", W / 2, 532, 13, "#ffe39a", "center", { font: FONT_B, weight: "800" });
   if (save.beaten) txt("★ CHAMPION OF SCHOOL ORDER ★", W / 2, 268, 22, "#ffd21f", "center", { stroke: INK });
 }
 
@@ -2393,6 +2494,10 @@ function drawLevelSelect() {
   txt("CHOOSE YOUR BATTLE", W / 2, 46, 52, "#ffcf33", "center", { stroke: INK, sw: 8 });
   const total = save.stars.reduce((a, b) => a + b, 0);
   txt(`★ ${total} / ${NUM_LEVELS * 3}`, W / 2, 86, 22, "#ffd21f", "center", { stroke: INK });
+  buttons.push({ x: W / 2 - 70, y: 68, w: 140, h: 36, cb: () => { // secret: tap the stars 5x
+    const now = G.t; G.starTaps = (G.starTaps || []).filter(t => now - t < 3); G.starTaps.push(now);
+    SFX.play("click"); if (G.starTaps.length >= 5) { G.starTaps = []; toggleInfinite(); }
+  } });
   const COLORS = ["#d63a2f", "#2b4f9e", "#f0812a", "#1f9e4a", "#2b6cd4", "#7b3fd0", "#c8283c"];
   for (let i = 0; i < NUM_LEVELS; i++) {
     const r = i < 4 ? 0 : 1, c = i < 4 ? i : i - 4, x = (r ? 140 : 26) + c * 230, y = 112 + r * 190, w = 216, h = 174;
@@ -2422,7 +2527,7 @@ function drawLevelSelect() {
     if (G.confirmReset > 0) { Object.assign(save, { unlocked: 1, stars: Array(NUM_LEVELS).fill(0), hi: Array(NUM_LEVELS).fill(0), beaten: false }); persist(); G.confirmReset = 0; toast("Progress reset."); }
     else G.confirmReset = 3;
   }, { size: 16, color: G.confirmReset > 0 ? "#ff6b6b" : "#bbb" });
-  txt("Tip: type a secret admin word for a caffeinated surprise...", W / 2, 516, 14, "rgba(255,255,255,0.6)", "center", { font: FONT_B, weight: "800" });
+  txt(IS_TOUCH ? "Tip: the stars hide a caffeinated surprise... tap tap tap tap tap." : "Tip: type a secret admin word for a caffeinated surprise...", W / 2, 516, 14, "rgba(255,255,255,0.6)", "center", { font: FONT_B, weight: "800" });
 }
 
 function drawCutscene() {
@@ -2544,10 +2649,11 @@ function drawEpilogue() {
 
 function drawPause() {
   ctx.fillStyle = "rgba(15,10,30,0.7)"; ctx.fillRect(0, 0, W, H);
-  panel(300, 140, 360, 260);
+  panel(300, 130, 360, fsAvailable() ? 340 : 260);
   txt("PAUSED", W / 2, 190, 56, INK);
   txt("Coffee break.", W / 2, 232, 20, "#666", "center", { font: FONT_B, weight: "900" });
   button(W / 2 - 110, 260, 220, 54, "RESUME", () => { G.paused = false; }, { color: "#7dffb0" });
+  if (fsAvailable()) button(W / 2 - 110, 410, 220, 40, isFullscreen() ? "EXIT FULL SCREEN" : "⛶ FULL SCREEN", toggleFullscreen, { size: 18, color: "#ffe39a" });
   button(W / 2 - 110, 326, 105, 44, "RETRY", () => startLevel(G.idx), { size: 20, color: "#cfe3ff" });
   button(W / 2 + 5, 326, 105, 44, "QUIT", () => setState("LEVEL_SELECT"), { size: 20, color: "#ffb3b3" });
 }
@@ -2557,10 +2663,13 @@ function drawPause() {
 function update(dt) {
   G.t += dt; G.stateT += dt; G.invuln = Math.max(0, G.invuln - dt); G.confirmReset = Math.max(0, G.confirmReset - dt);
   updateFX(dt);
+  checkOrientation();
+  if (PORTRAIT && G.state === "GAMEPLAY") G.paused = true;
   const clicks = input.clicks; input.clicks = [];
   const free = [];
   for (const c of clicks) {
-    const b = [...hotButtons].reverse().find(b => inRect(c.x, c.y, b));
+    const pad = c.touch ? 12 : 0;
+    const b = [...hotButtons].reverse().find(b => inRect(c.x, c.y, { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 }));
     if (b) b.cb(); else free.push(c);
   }
   if (kp("m")) toggleMute();
@@ -2588,7 +2697,7 @@ function update(dt) {
         if (after !== before) SFX.play(after <= 0 ? "go" : "beep");
         break;
       }
-      for (const c of free) G.level.click(c.x, c.y);
+      for (const c of free) G.level.click(c.x, c.y, c.touch);
       G.level.update(dt);
       break;
     case "LEVEL_COMPLETE":
@@ -2626,7 +2735,10 @@ function draw() {
         txt(n > 0 ? String(n) : "GO!", 0, 0, 120, n > 0 ? "#fff" : "#7dffb0", "center", { stroke: INK, sw: 14 });
         ctx.restore();
         txt(LEVEL_META[G.idx].goal, W / 2, H / 2 + 90, 24, "#ffe14d", "center", { stroke: INK });
-      } else if (!G.paused && G.level.overlayButtons) G.level.overlayButtons();
+      } else if (!G.paused) {
+        if (G.level.overlayButtons) G.level.overlayButtons();
+        if (G.level.usesJoystick && input.lastPointer !== "mouse") drawJoystick();
+      }
       button(W - 92, 7, 42, 30, "II", () => { G.paused = !G.paused; }, { size: 18, color: "#fff" });
       if (G.paused) drawPause();
     } else drawResults();
@@ -2640,6 +2752,7 @@ function draw() {
     ctx.globalAlpha = 1;
   }
   muteButton();
+  if ((G.state === "INTRO_SPLASH" || G.state === "LEVEL_SELECT") && fsAvailable()) fsButton(W - 92, 7);
   // cursor
   if (input.lastPointer === "mouse") {
     if (G.state === "GAMEPLAY" && G.idx === 0 && !G.paused && G.countdown <= 0) G.level.drawCursor();

@@ -13,8 +13,8 @@ A 7-level browser gag game: Assistant Principal Dr. Caliari vs. the chaotic PE c
 6. **In-Service Stealth Escape** – sneak past Pitts' flashlight cones
 7. **The Field Day Fiasco** – 3-phase golf-cart boss battle
 
-Works with keyboard, mouse or touch. Progress, stars and high scores save in your browser.
-Secret: type `WORKORDER` for Infinite Coffee Mode.
+Works with keyboard, mouse or touch. On phones: play in landscape, use the thumb stick on the left, and add it to your home screen (Share → Add to Home Screen on iPhone) to play full screen like an app. Progress, stars and high scores save in your browser.
+Secret: type `WORKORDER` (or tap the star counter on the level select 5 times) for Infinite Coffee Mode.
 
 ## Files
 - `index.html` – the whole game (no libraries; all sounds synthesized)
