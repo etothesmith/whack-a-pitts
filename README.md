@@ -1,6 +1,6 @@
 # Whack-a-Pitts: The Revenge of Dr. Caliari
 
-A 7-level browser gag game: Assistant Principal Dr. Caliari vs. the chaotic PE coach, Coach Pitts.
+A 7-level browser game: Assistant Principal Dr. Caliari vs. the chaotic PE coach, Coach Pitts.
 
 **Play:** https://etothesmith.github.io/whack-a-pitts/
 

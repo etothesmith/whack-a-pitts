@@ -42,7 +42,7 @@
 "use strict";
 /* =====================================================================
    WHACK-A-PITTS: THE REVENGE OF DR. CALIARI
-   A 6-level gag game. Single file, no dependencies.
+   A 7-level browser game. No dependencies.
    ---------------------------------------------------------------------
    CUSTOM SPRITES: paste image paths (e.g. "sprites/caliari_idle.png"),
    full URLs, or base64 data URIs ("data:image/png;base64,....") below,
@@ -2471,7 +2471,7 @@ function drawSplash() {
   rr(650, 420, 240, 50, 8, "#4f86c6", INK, 4); txt("COACH'S LOCKER", 770, 446, 22, "#fff");
   txt("VS", W / 2, 330, 70, "#fff", "center", { stroke: INK, sw: 10 });
   if (Math.floor(t * 2) % 2 === 0) txt(input.lastPointer === "mouse" ? "CLICK OR PRESS ENTER TO START" : "TAP TO START", W / 2, 400, 30, "#7dffb0", "center", { stroke: INK });
-  txt("A gag gift for Dr. Caliari · 7 levels of school-order justice", W / 2, 510, 16, "rgba(255,255,255,0.75)", "center", { font: FONT_B, weight: "800" });
+  txt("7 levels of school-order justice", W / 2, 510, 16, "rgba(255,255,255,0.75)", "center", { font: FONT_B, weight: "800" });
   if (IS_IOS && !navigator.standalone) txt("iPhone/iPad tip: Share → Add to Home Screen to play full screen", W / 2, 532, 13, "#ffe39a", "center", { font: FONT_B, weight: "800" });
   if (save.beaten) txt("★ CHAMPION OF SCHOOL ORDER ★", W / 2, 268, 22, "#ffd21f", "center", { stroke: INK });
 }
