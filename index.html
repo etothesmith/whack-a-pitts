@@ -325,7 +325,7 @@ function toLogical(e) {
 /* ---------- touch: floating thumb joystick (left half of the screen) ---------- */
 const IS_TOUCH = (window.matchMedia && matchMedia("(pointer: coarse)").matches) || ("ontouchstart" in window);
 const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0, ax: 0, ay: 0, R: 58 };
+const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0, ax: 0, ay: 0, R: 58, used: false };
 function joystickWanted() { return typeof G !== "undefined" && G.state === "GAMEPLAY" && !G.paused && G.countdown <= 0 && G.level && G.level.usesJoystick; }
 function hitsButton(p) { return typeof hotButtons !== "undefined" && hotButtons.some(b => inRect(p.x, p.y, { x: b.x - 10, y: b.y - 10, w: b.w + 20, h: b.h + 20 })); }
 canvas.addEventListener("pointerdown", e => {
@@ -336,7 +336,7 @@ canvas.addEventListener("pointerdown", e => {
   e.preventDefault();
   if (touch && joystickWanted()) {
     if (joy.id === null && p.x < W * 0.5 && p.y > 50 && !hitsButton(p)) {
-      Object.assign(joy, { id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y, ax: 0, ay: 0 });
+      Object.assign(joy, { used: true, id: e.pointerId, ox: p.x, oy: p.y, x: p.x, y: p.y, ax: 0, ay: 0 });
       return;
     }
     input.mx = p.x; input.my = p.y; input.clicks.push({ ...p, touch }); // taps only, no hold-to-move
@@ -374,7 +374,7 @@ function drawJoystick() {
   if (joy.id !== null) {
     ctx.globalAlpha = 0.35; circ(joy.ox, joy.oy, joy.R + 10, "#fff", INK, 3);
     ctx.globalAlpha = 0.85; circ(joy.x, joy.y, 26, "#ffcf33", INK, 3); ctx.globalAlpha = 1;
-  } else {
+  } else if (!joy.used) {
     ctx.globalAlpha = 0.28; circ(110, 440, joy.R + 10, "#fff", INK, 3); circ(110, 440, 26, "#ffcf33", INK, 3); ctx.globalAlpha = 1;
     txt("DRAG TO MOVE", 110, 520, 14, "rgba(255,255,255,0.7)", "center", { stroke: INK, sw: 3 });
   }
@@ -415,22 +415,35 @@ function burst(x, y, n, colors, o = {}) {
       c: pick(colors), s: rand(o.smin || 3, o.smax || 7), g: o.g ?? 500, shape: o.shape || "dot", rot: rand(0, TAU), vr: rand(-8, 8) });
   }
 }
+/* During gameplay, speech and banners go to ONE caption strip that each level
+   places in a spot where nothing playable happens (see captionPos()). */
+const inPlay = () => typeof G !== "undefined" && G.state === "GAMEPLAY";
 function bubble(x, y, text, who = "pitts", dur = 1.8) {
+  if (inPlay()) {
+    const c = FX.caption;
+    if (c && c.prio && c.t < c.dur) return; // don't bump gameplay instructions
+    FX.caption = { text, who, t: 0, dur: Math.min(dur, 1.7), prio: false };
+    return;
+  }
   FX.bubbles = FX.bubbles.filter(b => dist(b.x, b.y, x, y) > 60);
   FX.bubbles.push({ x, y, text, who, t: 0, dur });
 }
-function floater(x, y, text, color = "#ffe14d", size = 28) { FX.floats.push({ x, y, text, color, size, t: 0 }); }
+function floater(x, y, text, color = "#ffe14d", size = 28, rise = 40) { FX.floats.push({ x, y, text, color, size: Math.min(size, 26), rise, t: 0 }); }
 function shake(a) { FX.shake = Math.max(FX.shake, a); }
-function toast(text, dur = 2.2, color = "#ffe14d") { FX.toast = { text, t: 0, dur, color }; }
+function toast(text, dur = 2.2, color = "#ffe14d") {
+  if (inPlay()) { FX.caption = { text, who: "info", color, t: 0, dur, prio: true }; return; }
+  FX.toast = { text, t: 0, dur, color };
+}
 function updateFX(dt) {
   for (const p of FX.parts) { p.t += dt; p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; }
   FX.parts = FX.parts.filter(p => p.t < p.life);
   for (const b of FX.bubbles) b.t += dt; FX.bubbles = FX.bubbles.filter(b => b.t < b.dur);
-  for (const f of FX.floats) { f.t += dt; f.y -= 50 * dt; } FX.floats = FX.floats.filter(f => f.t < 1);
+  for (const f of FX.floats) { f.t += dt; f.y -= f.rise * dt; } FX.floats = FX.floats.filter(f => f.t < 0.9);
+  if (FX.caption) { FX.caption.t += dt; if (FX.caption.t > FX.caption.dur) FX.caption = null; }
   FX.shake = Math.max(0, FX.shake - dt * 30);
   if (FX.toast) { FX.toast.t += dt; if (FX.toast.t > FX.toast.dur) FX.toast = null; }
 }
-function clearFX() { FX.parts = []; FX.bubbles = []; FX.floats = []; FX.shake = 0; }
+function clearFX() { FX.parts = []; FX.bubbles = []; FX.floats = []; FX.shake = 0; FX.caption = null; }
 function drawFX() {
   for (const p of FX.parts) {
     ctx.globalAlpha = clamp(1 - p.t / p.life, 0, 1);
@@ -442,11 +455,30 @@ function drawFX() {
   }
   ctx.globalAlpha = 1;
   for (const f of FX.floats) {
-    ctx.globalAlpha = clamp(1.4 - f.t * 1.4, 0, 1);
+    ctx.globalAlpha = clamp(1.3 - f.t * 1.45, 0, 0.9);
     txt(f.text, f.x, f.y, f.size, f.color, "center", { stroke: INK });
   }
   ctx.globalAlpha = 1;
   for (const b of FX.bubbles) drawBubble(b);
+}
+function drawCaption() {
+  const c = FX.caption; if (!c || !G.level) return;
+  const pos = Object.assign({ x: W / 2, y: 72 }, G.level.captionPos ? G.level.captionPos() : {});
+  const a = clamp(Math.min(c.t * 8, (c.dur - c.t) * 5), 0, 1);
+  const name = c.who === "pitts" ? "COACH PITTS:" : c.who === "caliari" ? "DR. C:" : "";
+  const col = c.who === "pitts" ? "#ff8b7b" : c.who === "caliari" ? "#7fd0ff" : (c.color || "#ffe14d");
+  let size = 16, nw, tw;
+  for (; size >= 12; size--) {
+    ctx.font = `900 ${size}px ${FONT_B}`; nw = name ? ctx.measureText(name + " ").width : 0;
+    ctx.font = `800 ${size}px ${FONT_B}`; tw = ctx.measureText(c.text).width;
+    if (nw + tw + 32 <= 640) break;
+  }
+  const w = Math.min(660, nw + tw + 32), h = size + 14, x = clamp(pos.x - w / 2, 6, W - w - 6), y = pos.y - h / 2;
+  ctx.save(); ctx.globalAlpha = a * 0.92;
+  rr(x, y, w, h, h / 2, "rgba(23,17,43,0.85)", col, 2.5);
+  if (name) txt(name, x + 16, pos.y + 1, size, col, "left", { font: FONT_B, weight: "900" });
+  txt(c.text, x + 16 + nw, pos.y + 1, size, "#fff", "left", { font: FONT_B, weight: "800" });
+  ctx.restore();
 }
 function drawBubble(b) {
   const pop = Math.min(1, b.t * 8), fade = clamp((b.dur - b.t) * 4, 0, 1);
@@ -863,7 +895,7 @@ function failLevel(reason) {
 }
 function startLevel(i) {
   G.idx = i; G.level = new LEVEL_CLASSES[i](); G.level.init();
-  G.coffee = 3; G.invuln = 0; G.paused = false; clearFX();
+  G.coffee = 3; G.invuln = 0; G.paused = false; clearFX(); joy.used = false;
   G.cut = { i: 0, chars: 0 };
   setState("PRE_LEVEL_CUTSCENE");
 }
@@ -971,6 +1003,7 @@ class Level1 {
       this.holes.push({ x: 250 + c * 230, y: 205 + r * 128, kind: kinds[i], keys: keys[i], state: "down", pop: 0, t: 0, dur: 1, who: null, hit: false, hitT: 0 });
     }
   }
+  captionPos() { return { y: 74 }; } // banner area above the top row of holes
   hud() { return { time: this.time, info: `GOAL 2,000 · x${this.mult().toFixed(1)} combo`, progress: this.score / 2000 }; }
   mult() { return Math.min(3, 1 + Math.floor(this.combo / 4) * 0.5); }
   stars() { return this.score >= 4200 ? 3 : this.score >= 3000 ? 2 : 1; }
@@ -1135,6 +1168,7 @@ class LevelWrestle {
     this.banner = { text: "PERIOD 1", sub: "Wrestlers, shake hands!", t: 0 }; this.shootT = rand(2.2, 3.2);
     this.mashFx = 0; this.refArm = 0; this.refT = 0; this.sudden = false; this.how = ""; this.nf = 0;
   }
+  captionPos() { return { y: 71 }; } // replaces the meet banner
   hud() {
     return { time: this.sudden ? undefined : this.ptime, info: `${this.sudden ? "SUDDEN VICTORY" : "PERIOD " + this.period} · CALIARI ${this.me} – ${this.them} PITTS`,
       progress: this.sudden ? 1 : ((this.period - 1) * PERIOD_LEN + (PERIOD_LEN - this.ptime)) / (PERIOD_LEN * 3) };
@@ -1143,8 +1177,8 @@ class LevelWrestle {
   diff() { return this.period + (this.sudden ? 1 : 0); }
   // ---- scoring ----
   award(who, pts, label) {
-    if (who === "me") { this.me += pts; this.score += pts * 250; this.refArm = -1; floater(330, 250, `${label} +${pts}`, "#7dffb0", 30); SFX.play("cheer"); }
-    else { this.them += pts; this.refArm = 1; floater(630, 250, `${label} +${pts}`, "#ff9b6b", 30); SFX.play("wrong"); }
+    if (who === "me") { this.me += pts; this.score += pts * 250; this.refArm = -1; floater(300, 300, `${label} +${pts}`, "#7dffb0", 26, 0); SFX.play("cheer"); }
+    else { this.them += pts; this.refArm = 1; floater(660, 300, `${label} +${pts}`, "#ff9b6b", 26, 0); SFX.play("wrong"); }
     this.refT = 1.2; this.wait = 0.7; SFX.play("chirp");
     if (this.me - this.them >= 15) { this.how = "tech"; this.end(true); return true; }
     if (this.them - this.me >= 15) { this.end(false, "TECH FALL! Pitts went up by 15. He's already printing the T-shirts."); return true; }
@@ -1168,7 +1202,7 @@ class LevelWrestle {
     if (this.qte) {
       if (d === this.qte.dir) {
         this.qte = null; this.bar = Math.min(0.95, this.bar + 0.3); this.score += 100;
-        SFX.play("bonk"); shake(4); floater(480, 200, "SPRAWL! COUNTERED!", "#ffe14d", 28);
+        SFX.play("bonk"); shake(4); floater(480, 300, "SPRAWL! COUNTERED!", "#ffe14d", 26, 0);
         if (Math.random() < 0.35) bubble(400, 300, pick(["Did you file a work order for that move?!", "Not on my watch, Pitts!", "Policy 4.2.1: no cheap shots!"]), "caliari", 1.4);
         this.shootT = rand(2, 3.4) - this.diff() * 0.25;
       } else this.pittsTakedown();
@@ -1291,8 +1325,7 @@ class LevelWrestle {
         circ(x, 150 + r * 34 - 6 - bounce, 9, ["#d63a2f", "#1f3d7a", "#ffe14d", "#fff", "#2fb36b"][(i + r) % 5], INK, 1.5);
       }
     }
-    rr(250, 54, 460, 34, 8, "#d63a2f", INK, 3);
-    txt("DUAL MEET: ADMINISTRATION vs. ATHLETICS", 480, 72, 20, "#fff");
+    if (!FX.caption) { rr(250, 54, 460, 34, 8, "#d63a2f", INK, 3); txt("DUAL MEET: ADMINISTRATION vs. ATHLETICS", 480, 72, 20, "#fff"); }
     // floor + mat
     ctx.fillStyle = "#d9a25f"; ctx.fillRect(0, 320, W, H - 320);
     ell(480, 440, 440, 112, "#7a1f2b", INK, 4);
@@ -1401,6 +1434,7 @@ class Level2 {
     this.lane = 1; this.py = LANES_Y[1]; this.px = 170; this.jT = 0; this.shield = 0; this.boost = 0; this.slow = 0;
     this.ammo = 1; this.objs = []; this.shots = []; this.spawnT = 1.2; this.scroll = 0; this.throwAnim = 0;
   }
+  captionPos() { return { y: 70 }; } // hallway wall, above the lanes
   hud() { return { time: this.time, info: `${Math.floor(this.m)} / 1500 m · 🎺x${this.ammo}`, progress: this.m / 1500 }; }
   stars() { return G.infinite ? 3 : G.coffee; }
   jumpH() { return this.jT > 0 ? Math.sin(Math.PI * (1 - this.jT / 0.6)) * 72 : 0; }
@@ -1613,6 +1647,7 @@ class Level3 {
   }
   acc() { return this.done ? this.correct / this.done : 1; }
   mult() { return Math.min(3, 1 + Math.floor(this.streak / 4) * 0.5); }
+  captionPos() { return { y: 160 }; } // gap between paperwork meter and conveyor
   hud() { return { info: `${this.done}/25 tickets · ${Math.round(this.acc() * 100)}% acc · x${this.mult().toFixed(1)}`, progress: this.done / 25 }; }
   stars() { const a = this.acc(); return a >= 0.96 ? 3 : a >= 0.9 ? 2 : 1; }
   active() { return this.cards.find(c => !c.decided); }
@@ -1635,11 +1670,11 @@ class Level3 {
       this.correct++; this.streak++;
       const fast = c.activeT < 2.5 ? 50 : 0;
       const pts = Math.round((100 + fast) * this.mult());
-      this.score += pts; floater(c.x, c.y - 120, "+" + pts + (fast ? " FAST!" : ""), "#ffe14d");
+      this.score += pts; floater(c.x, c.y, "+" + pts + (fast ? " FAST!" : ""), "#ffe14d", 26, 0);
       this.meter = Math.max(0, this.meter - 6);
     } else {
       this.streak = 0; this.meter += 16; SFX.play("wrong");
-      floater(c.x, c.y - 120, c.ok ? "THAT WAS A REAL EMERGENCY!" : "NO WORK ORDER, NO REPAIR!", "#ff6b6b", 22);
+      floater(c.x, c.y + 30, c.ok ? "THAT WAS A REAL EMERGENCY!" : "NO WORK ORDER, NO REPAIR!", "#ff6b6b", 20, 0);
       if (!c.ok) bubble(150, 150, "Ha! Got one past ya, Dr. C!", "pitts", 1.6);
     }
     this.flying.push({ c, green, t: 0, vx: green ? -300 : 200, vy: green ? -500 : -200, rot: 0 });
@@ -1674,7 +1709,7 @@ class Level3 {
     if (lost) {
       this.cards = this.cards.filter(c => c !== lost);
       this.done++; this.streak = 0; this.meter += 20; SFX.play("buzzer");
-      floater(200, 200, "TICKET LOST IN THE PILE!", "#ff6b6b", 24);
+      floater(200, 300, "TICKET LOST IN THE PILE!", "#ff6b6b", 22, 0);
       this.checkEnd();
     }
     for (const f of this.flying) { f.t += dt; f.c.x += f.vx * dt; f.c.y += f.vy * dt; f.vy += 1300 * dt; f.rot += dt * (f.green ? -3 : 4); }
@@ -1738,7 +1773,7 @@ class Level3 {
     rr(300, 92, 360, 26, 10, "#1b1430", INK, 3);
     const mw = 352 * clamp(this.meter / 100, 0, 1);
     if (mw > 4) rr(304, 96, mw, 18, 6, this.meter > 70 ? "#ff4d4d" : this.meter > 40 ? "#ffb02e" : "#7dffb0");
-    if (this.meter > 70 && Math.floor(this.t * 4) % 2) txt("DESK BURIAL IMMINENT!", 480, 140, 20, "#ff6b6b", "center", { stroke: INK });
+    if (this.meter > 70 && Math.floor(this.t * 4) % 2) txt("BURIAL IMMINENT!", 760, 105, 18, "#ff6b6b", "left", { stroke: INK });
   }
   overlayButtons() {
     button(250, 430, 210, 84, "✔ EMERGENCY", () => this.decide(true), { color: "#45d07a", size: 28 });
@@ -1759,6 +1794,7 @@ class Level4 {
     this.skids = [];
     for (let i = 0; i < 16; i++) this.addItem();
   }
+  captionPos() { return { y: this.py < 230 ? 512 : 70 }; } // court edge away from Dr. C
   hud() { return { time: this.time, info: `Stowed ${this.stowed}/40 · Bin ${this.carried.length}/6`, progress: this.stowed / 40 }; }
   stars() { return this.time >= 40 ? 3 : this.time >= 15 ? 2 : 1; }
   addItem(x, y) {
@@ -1965,6 +2001,7 @@ class Level5 {
     return { path, i: 1, x: c * T5 + 20, y: OY5 + r * T5 + 20, dir: 0, state: "patrol", route: null, alert: 0, lost: 0, wait: 0, speed: 62, home: [c, r], repath: 0 };
   }
   resetGuards() { this.guards = this.guards.map(g => this.makeGuard(g.path)); this.thrown = []; }
+  captionPos() { return { x: 420, y: 520 }; } // bottom wall row
   hud() { return { info: `📋 ${this.got}/5 · 🍩 x${this.donuts} · spotted ${this.spotted}`, progress: this.got / 5 }; }
   stars() { return this.spotted === 0 ? 3 : this.spotted <= 2 ? 2 : 1; }
   tileAt(x, y) { const c = Math.floor(x / T5), r = Math.floor((y - OY5) / T5); if (r < 0 || r >= ROWS5 || c < 0 || c >= COLS5) return "#"; return this.grid[r][c]; }
@@ -2172,6 +2209,10 @@ class Level6 {
     this.ang = Math.PI / 2; this.bx = TCX; this.by = TCY + TRY; this.fire1 = 1.6; this.fire2 = 3.5; this.whistleT = 2; this.blowT = 0; this.coneT = 1.2;
     this.valves = [{ x: 210, y: 170 }, { x: 750, y: 170 }, { x: 480, y: 450 }].map(v => ({ ...v, cd: 0, flood: 0 }));
     this.charge = null; this.stun = 0; this.shorts = 0; this.clank = 0; this.bflip = false; this.hitFlash = 0; this.tookDamage = false;
+  }
+  captionPos() { // whichever edge (top stands / bottom) is farther from both Dr. C and Pitts
+    const score = y => Math.min(Math.abs(this.py - 30 - y), Math.abs(this.by - 40 - y));
+    return { x: 420, y: score(88) >= score(510) ? 88 : 510 };
   }
   hud() {
     const label = ["", "PHASE 1: DRIVE-BY", "PHASE 2: WHISTLE SHOCKWAVE", "PHASE 3: SPRINKLER SHOWDOWN"][this.phase];
@@ -2725,6 +2766,7 @@ function draw() {
     case "VICTORY_EPILOGUE": drawEpilogue(); drawFX(); break;
   }
   ctx.restore();
+  if (G.state === "GAMEPLAY" && G.countdown <= 0) drawCaption();
   if (["GAMEPLAY", "LEVEL_COMPLETE", "GAME_OVER"].includes(G.state)) {
     drawHUD();
     if (G.state === "GAMEPLAY") {
